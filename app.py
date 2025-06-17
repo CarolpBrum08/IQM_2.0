@@ -19,20 +19,21 @@ def load_geo_from_zip(url):
     st.info("🔄 Baixando shapefile zipado...")
     r = requests.get(url)
     z = zipfile.ZipFile(io.BytesIO(r.content))
-    z.extractall("data/geo")
-    shapefiles = [f for f in os.listdir("data/geo") if f.endswith(".shp")]
+    os.makedirs("geo", exist_ok=True)
+    z.extractall("geo")
+    shapefiles = [f for f in os.listdir("geo") if f.endswith(".shp")]
     if not shapefiles:
         st.error("Nenhum .shp encontrado no ZIP!")
         st.stop()
-    shp_path = os.path.join("data/geo", shapefiles[0])
+    shp_path = os.path.join("geo", shapefiles[0])
     gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
     return gdf
 
 # Função para carregar a planilha
 @st.cache_data
 def load_excel():
-    df_qualif = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
-    df_ranking = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
+    df_qualif = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
+    df_ranking = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
     return df_qualif, df_ranking
 
 # Carregar dados
@@ -48,7 +49,6 @@ if "CD_MICRO" in gdf.columns:
     gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
     geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
 else:
-    # fallback: tentar usar outra coluna
     gdf["CD_MICRO"] = gdf[gdf.columns[0]].astype(str)
     geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
 
