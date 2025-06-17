@@ -1,0 +1,9 @@
+streamlit>=1.35.0
+pandas
+geopandas
+plotly
+openpyxl
+pyproj
+shapely
+fiona
+requests
