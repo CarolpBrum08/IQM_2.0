@@ -1,0 +1,5 @@
+*.zip
+*.xlsm
+__pycache__/
+.venv/
+geo/
