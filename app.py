@@ -18,22 +18,35 @@ URL_ZIP = "https://www.dropbox.com/scl/fi/ij1y8m3bwn6voyr7xrj4p/BR_RG_Imediatas_
 def load_geo_from_zip(url):
     st.info("🔄 Baixando shapefile zipado...")
     r = requests.get(url)
+    
+    # Verifica se resposta foi ZIP
+    if r.headers.get("Content-Type") not in ["application/zip", "application/octet-stream"]:
+        st.error("Erro: o link não retornou um ZIP válido. Verifique a URL.")
+        st.stop()
+    
     z = zipfile.ZipFile(io.BytesIO(r.content))
-    os.makedirs("geo", exist_ok=True)
-    z.extractall("geo")
-    shapefiles = [f for f in os.listdir("geo") if f.endswith(".shp")]
-    if not shapefiles:
+    
+    # Cria pasta temporária para extração
+    os.makedirs("geo_tmp", exist_ok=True)
+    z.extractall("geo_tmp")
+    
+    # Procura .shp
+    shp_files = [f for f in os.listdir("geo_tmp") if f.endswith(".shp")]
+    if not shp_files:
         st.error("Nenhum .shp encontrado no ZIP!")
         st.stop()
-    shp_path = os.path.join("geo", shapefiles[0])
+    
+    # Lê shapefile
+    shp_path = os.path.join("geo_tmp", shp_files[0])
     gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
+    
     return gdf
 
 # Função para carregar a planilha
 @st.cache_data
 def load_excel():
-    df_qualif = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
-    df_ranking = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
+    df_qualif = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
+    df_ranking = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
     return df_qualif, df_ranking
 
 # Carregar dados
