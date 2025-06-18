@@ -14,42 +14,49 @@ st.set_page_config(layout="wide", page_title="Comparador de Microregiões - IQM 
 # URL do shapefile zipado
 URL_ZIP = "https://www.dropbox.com/scl/fi/ij1y8m3bwn6voyr7xrj4p/BR_RG_Imediatas_2024.zip?rlkey=npfrxoci8ufu2zap40grp8zxr&st=hhzu0dup&dl=1"
 
-# Nome do arquivo Excel (deixe no mesmo local do .py na Streamlit Cloud)
+# Nome do arquivo Excel (deixe no mesmo local do app)
 EXCEL_FILE = "IQM_BRASIL_2025_V1.xlsm"
 
-# Função para baixar e extrair o zip
-@st.cache_data
+# Função para baixar e extrair zip
 def load_geo_from_zip(url):
-    st.info("🔄 Baixando shapefile zipado...")
-    r = requests.get(url)
-    z = zipfile.ZipFile(io.BytesIO(r.content))
-    with tempfile.TemporaryDirectory() as tmpdir:
-        z.extractall(tmpdir)
-        shapefiles = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-        if not shapefiles:
-            st.error("Nenhum .shp encontrado no ZIP!")
+    with st.spinner("🔄 Baixando e extraindo shapefile..."):
+        try:
+            r = requests.get(url, timeout=60)
+            z = zipfile.ZipFile(io.BytesIO(r.content))
+            with tempfile.TemporaryDirectory() as tmpdir:
+                z.extractall(tmpdir)
+                shapefiles = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                if not shapefiles:
+                    st.error("Nenhum arquivo .shp encontrado!")
+                    st.stop()
+                shp_path = os.path.join(tmpdir, shapefiles[0])
+                gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
+                st.success("✅ Shapefile carregado com sucesso!")
+                return gdf.copy()
+        except Exception as e:
+            st.error(f"Erro ao baixar/extrair shapefile: {e}")
             st.stop()
-        shp_path = os.path.join(tmpdir, shapefiles[0])
-        gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
-        return gdf.copy()
 
-# Função para carregar a planilha
-@st.cache_data
+# Função para carregar Excel
 def load_excel(excel_path):
-    st.info("📥 Carregando dados da planilha...")
-    df_qualif = pd.read_excel(excel_path, sheet_name="IQM_Qualificação", header=3)
-    df_ranking = pd.read_excel(excel_path, sheet_name="IQM_Ranking")
-    return df_qualif, df_ranking
+    with st.spinner("📥 Carregando dados da planilha..."):
+        try:
+            df_qualif = pd.read_excel(excel_path, sheet_name="IQM_Qualificação", header=3)
+            df_ranking = pd.read_excel(excel_path, sheet_name="IQM_Ranking")
+            st.success("✅ Planilha carregada com sucesso!")
+            return df_qualif, df_ranking
+        except Exception as e:
+            st.error(f"Erro ao carregar planilha Excel: {e}")
+            st.stop()
 
-# Carregar dados
+# --- Carregar dados ---
 gdf = load_geo_from_zip(URL_ZIP)
 df_qualif, df_ranking = load_excel(EXCEL_FILE)
 
-# Ajuste para merge
+# Ajustes
 df_qualif["Código da Microrregião"] = df_qualif["Código da Microrregião"].astype(str)
 df_ranking["Código da Microrregião"] = df_ranking["Código da Microrregião"].astype(str)
 
-# Ajuste no GeoDataFrame
 if "CD_MICRO" in gdf.columns:
     gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
     geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
@@ -59,10 +66,9 @@ else:
 
 geo_df = gpd.GeoDataFrame(geo_df, geometry="geometry")
 
-# Título
+# --- APP ---
 st.title("📍 Comparador de Microregiões - IQM 2025")
 
-# Filtros
 ufs = sorted(df_ranking["UF"].unique())
 uf_sel = st.selectbox("Selecione o Estado (UF):", ufs)
 
