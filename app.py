@@ -2,110 +2,86 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import plotly.express as px
+import requests
 import zipfile
 import io
-import requests
-import os
-import tempfile
 
 # Configuração da página
-st.set_page_config(layout="wide", page_title="Comparador de Microregiões - IQM 2025")
+st.set_page_config(layout="wide", page_title="Comparador de Microrregiões - IQM 2025", page_icon="📍")
 
-# URL do shapefile zipado
-URL_ZIP = "https://www.dropbox.com/scl/fi/ij1y8m3bwn6voyr7xrj4p/BR_RG_Imediatas_2024.zip?rlkey=npfrxoci8ufu2zap40grp8zxr&st=hhzu0dup&dl=1"
+# Títulos e instruções
+st.markdown("<h1 style='font-size: 36px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
 
-# Nome do arquivo Excel (deixe no mesmo local do app)
-EXCEL_FILE = "IQM_BRASIL_2025_V1.xlsm"
+# URL do novo shapefile de microrregiões 2022
+shapefile_url = "https://www.dropbox.com/scl/fi/9ykpfmts35d0ct0ufh7c6/BR_Microrregioes_2022.zip?rlkey=kjbpqi3f6aeun4ctscae02k9e&st=she208vj&dl=1"
 
-# Função para baixar e extrair zip
-def load_geo_from_zip(url):
-    with st.spinner("🔄 Baixando e extraindo shapefile..."):
-        try:
-            r = requests.get(url, timeout=60)
-            z = zipfile.ZipFile(io.BytesIO(r.content))
-            with tempfile.TemporaryDirectory() as tmpdir:
-                z.extractall(tmpdir)
-                shapefiles = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                if not shapefiles:
-                    st.error("Nenhum arquivo .shp encontrado!")
-                    st.stop()
-                shp_path = os.path.join(tmpdir, shapefiles[0])
-                gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
-                st.success("✅ Shapefile carregado com sucesso!")
-                return gdf.copy()
-        except Exception as e:
-            st.error(f"Erro ao baixar/extrair shapefile: {e}")
-            st.stop()
+# Nome do arquivo Excel que está no mesmo nível do script
+excel_file = "IQM_Qualificação_2025.xlsx"
 
-# Função para carregar Excel
-def load_excel(excel_path):
-    with st.spinner("📥 Carregando dados da planilha..."):
-        try:
-            df_qualif = pd.read_excel(excel_path, sheet_name="IQM_Qualificação", header=3)
-            df_ranking = pd.read_excel(excel_path, sheet_name="IQM_Ranking")
-            st.success("✅ Planilha carregada com sucesso!")
-            return df_qualif, df_ranking
-        except Exception as e:
-            st.error(f"Erro ao carregar planilha Excel: {e}")
-            st.stop()
+# Baixa e carrega o shapefile
+with st.spinner("Baixando shapefile zipado..."):
+    r = requests.get(shapefile_url)
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    z.extractall(".")
 
-# --- Carregar dados ---
-gdf = load_geo_from_zip(URL_ZIP)
-df_qualif, df_ranking = load_excel(EXCEL_FILE)
+# Identifica o arquivo .shp extraído
+import os
+shp_file = [f for f in os.listdir(".") if f.endswith(".shp")][0]
 
-# Ajustes
-df_qualif["Código da Microrregião"] = df_qualif["Código da Microrregião"].astype(str)
-df_ranking["Código da Microrregião"] = df_ranking["Código da Microrregião"].astype(str)
+# Carrega o shapefile como GeoDataFrame
+geo = gpd.read_file(shp_file)
 
-if "CD_MICRO" in gdf.columns:
-    gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
-    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
-else:
-    gdf["CD_MICRO"] = gdf[gdf.columns[0]].astype(str)
-    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
+# Padroniza nomes de colunas
+geo = geo.rename(columns={
+    "CD_MICRO": "CD_MICRO",
+    "NM_MICRO": "Microrregião",
+    "NM_UF": "UF"
+})
 
-geo_df = gpd.GeoDataFrame(geo_df, geometry="geometry")
+# Lê o Excel
+with st.spinner("Carregando dados da planilha..."):
+    df = pd.read_excel(excel_file, sheet_name="IQM_Qualificação")
 
-# --- APP ---
-st.title("📍 Comparador de Microregiões - IQM 2025")
+# Faz o merge entre shapefile e Excel
+geo_df = pd.merge(geo, df, on="CD_MICRO", how="inner")
 
-ufs = sorted(df_ranking["UF"].unique())
-uf_sel = st.selectbox("Selecione o Estado (UF):", ufs)
+# Mensagens de sucesso (com toast)
+st.toast("🗺️ Shapefile carregado com sucesso!")
+st.toast("📊 Planilha carregada com sucesso!")
 
-df_uf = df_ranking[df_ranking["UF"] == uf_sel]
-micro_sel = st.multiselect("Selecione Microregiões para comparar:", df_uf["Microrregião"].unique())
+# Sidebar - filtros
+st.sidebar.header("Filtros")
 
-df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micro_sel))]
+uf_sel = st.sidebar.selectbox("Selecione o Estado (UF):", sorted(geo_df["UF"].unique()))
+
+# Filtra microrregiões do estado escolhido
+df_uf = geo_df[geo_df["UF"] == uf_sel]
+micros_uf = sorted(df_uf["Microrregião"].unique())
+
+micro_sel = st.sidebar.multiselect("Selecione Microrregiões para comparar:", micros_uf)
+
+# Mostra resultados se tiver seleção
 geo_sel = geo_df[geo_df["Microrregião"].isin(micro_sel)]
 
-# Mapa
 if not geo_sel.empty:
-    st.subheader("🗺️ Mapa das Microregiões Selecionadas")
-    fig = px.choropleth(
+    st.subheader("🗺️ Mapa das Microrregiões Selecionadas")
+
+    fig = px.choropleth_mapbox(
         geo_sel,
-        geojson=geo_sel.__geo_interface__,
-        locations="Código da Microrregião",
-        color="IQM / 2025",
+        geojson=geo_sel.geometry,
+        locations=geo_sel.index,
+        color="IQM FINAL",
         hover_name="Microrregião",
-        projection="mercator",
-        color_continuous_scale="YlOrBr"
+        hover_data={"IQM FINAL": True, "UF": True},
+        mapbox_style="carto-positron",
+        center={"lat": geo_sel.geometry.centroid.y.mean(), "lon": geo_sel.geometry.centroid.x.mean()},
+        zoom=5,
+        opacity=0.7
     )
-    fig.update_geos(fitbounds="locations", visible=False)
-    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Cards
-    st.subheader("📊 Indicadores das Microregiões Selecionadas")
-    cols = st.columns(4)
-    cols[0].metric("IQM TOTAL", round(df_sel["IQM / 2025"].mean(), 2))
-    cols[1].metric("IQM-D", round(df_sel["IQM-D"].mean(), 2))
-    cols[2].metric("IQM-C", round(df_sel["IQM-C"].mean(), 2))
-    cols[3].metric("IQM-IU", round(df_sel["IQM-IU"].mean(), 2))
-
-    # Tabela
-    st.subheader("📋 Tabela Qualificação - Detalhe das Selecionadas")
-    df_qualif_sel = df_qualif[df_qualif["Microrregião"].isin(micro_sel)]
-    st.dataframe(df_qualif_sel, use_container_width=True)
+    st.subheader("📋 Indicadores das Microrregiões")
+    st.dataframe(geo_sel[["UF", "Microrregião", "IQM FINAL"]].sort_values(by="IQM FINAL", ascending=False), use_container_width=True)
 
 else:
     st.warning("Selecione uma ou mais microregiões para visualizar.")
