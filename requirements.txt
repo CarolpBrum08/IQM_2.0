@@ -7,3 +7,5 @@ pyproj
 shapely
 fiona
 requests
+folium
+streamlit-folium
