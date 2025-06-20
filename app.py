@@ -1,94 +1,119 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
-import requests
+import plotly.express as px
+import zipfile
 import io
-import folium
-from streamlit_folium import st_folium
+import requests
+import json
+import os
 
-# CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(
-    page_title="IQM 2025 - Comparador de Microrregiões",
-    page_icon="📍",
-    layout="wide"
-)
+# PRIMEIRO comando Streamlit
+st.set_page_config(layout="wide")
 
-# TÍTULO
-st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
+# ======= Carga de dados =======
+@st.cache_data
+def load_data():
+    df = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
+    ranking = pd.read_excel("IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
+    return df, ranking
 
-# --- LINKS DO GEOJSON E PLANILHA ---
+@st.cache_data
+def load_geo():
+    st.info("🔄 Baixando shapefile zipado do Dropbox...")
 
-# GeoJSON
-geojson_url = "https://www.dropbox.com/scl/fi/zxqlidj8bl90zfoyg903q/BR_Microrregioes_2022.json?rlkey=146tfdmyvgh58bu5p11zycuko&st=geevr72o&dl=1"
+    url = "https://www.dropbox.com/scl/fi/9ykpfmts35d0ct0ufh7c6/BR_Microrregioes_2022.zip?rlkey=kjbpqi3f6aeun4ctscae02k9e&st=mer376fu&dl=1"
 
-# Planilha Excel
-excel_url = "https://www.dropbox.com/scl/fi/b1wxo02asus661r6k6kjb/IQM_BRASIL_2025_V1.xlsm?rlkey=vsu1wm2mi768vqgjknpmbee70&st=8722gdyh&dl=1"
-
-# --- FUNÇÃO: CARREGAR GEOJSON REMOTO ---
-@st.cache_data(show_spinner=False)
-def load_geojson(url):
     r = requests.get(url)
-    r.raise_for_status()
-    gdf = gpd.read_file(io.BytesIO(r.content))
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    z.extractall("micros")
+
+    gdf = gpd.read_file("micros/BR_Microrregioes_2022.shp").to_crs(epsg=4326)
+    gdf = gdf[['CD_MICRO', 'geometry']]
     return gdf
 
-# --- FUNÇÃO: CARREGAR PLANILHA REMOTA ---
-@st.cache_data(show_spinner=False)
-def load_excel(url):
-    r = requests.get(url)
-    r.raise_for_status()
-    df_qualificacao = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Qualificação")
-    df_ranking = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Ranking")
-    return df_qualificacao, df_ranking
+df, df_ranking = load_data()
+gdf = load_geo()
 
-# --- CARREGA DADOS ---
-with st.spinner("🔄 Carregando GeoJSON..."):
-    gdf = load_geojson(geojson_url)
-st.success("✅ GeoJSON carregado com sucesso!", icon="✅")
+# Ajustar tipos para merge
+df["Código da Microrregião"] = df["Código da Microrregião"].astype(str)
+gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
 
-with st.spinner("🔄 Carregando planilha..."):
-    df_qualificacao, df_ranking = load_excel(excel_url)
-st.success("✅ Planilha carregada com sucesso!", icon="✅")
+# Merge para juntar geometria e indicadores
+geo_df = pd.merge(df, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
 
-# --- INTERFACE ---
+# ======= Interface =======
+st.title("📊 Dashboard IQM - Microregiões do Brasil")
 
 # Filtro por Estado
-ufs = sorted(gdf["UF"].unique())
-uf_selecionada = st.selectbox("Selecione o Estado (UF):", ufs)
+ufs = sorted(geo_df["UF"].unique())
+uf_sel = st.selectbox("Selecione um Estado (UF):", ufs)
+df_uf = geo_df[geo_df["UF"] == uf_sel]
 
-# Filtro por Microrregião
-micros_disponiveis = gdf[gdf["UF"] == uf_selecionada]["NM_MICRO"].unique()
-micros_selecionadas = st.multiselect(
-    "Selecione Microrregiões para comparar:",
-    options=sorted(micros_disponiveis)
-)
+# Seleção de indicador
+indicadores = ["IQM", "Desvio Padrão", "Correção", "IQM FINAL", "Top 10 Microregiões (Ranking IQM)"]
+ind_sel = st.selectbox("Selecione o Indicador:", indicadores)
 
-# Exibe mapa se houver seleção
-if len(micros_selecionadas) > 0:
-    gdf_filtrado = gdf[
-        (gdf["UF"] == uf_selecionada) & 
-        (gdf["NM_MICRO"].isin(micros_selecionadas))
-    ]
+# Modo normal
+if ind_sel != "Top 10 Microregiões (Ranking IQM)":
+    gdf_uf = gpd.GeoDataFrame(df_uf).set_index("Código da Microrregião")
+    geojson = json.loads(gdf_uf.to_json())
 
-    # Cria mapa
-    m = folium.Map(location=[-14.2350, -51.9253], zoom_start=5, tiles="cartodbpositron")
-    folium.GeoJson(gdf_filtrado, name="Microrregiões").add_to(m)
+    st.subheader(f"{ind_sel} - Microregiões de {uf_sel}")
+    fig = px.choropleth(
+        df_uf,
+        geojson=geojson,
+        locations="Código da Microrregião",
+        color=ind_sel,
+        hover_name="Microrregião",
+        projection="mercator",
+        color_continuous_scale="YlGnBu"
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Mostra no Streamlit
-    st_folium(m, width=1000, height=600)
+    # Ranking normal
+    st.subheader("🏆 Ranking por " + ind_sel)
+    rank = df_uf[["Microrregião", ind_sel]].sort_values(by=ind_sel, ascending=False).reset_index(drop=True)
+    rank.index += 1
+    st.dataframe(rank.style.background_gradient(cmap="YlGnBu", subset=[ind_sel]), use_container_width=True)
+
 else:
-    st.warning("Selecione uma ou mais microrregiões para visualizar.")
+    st.subheader("🏆 Top 10 Microregiões - Ranking IQM (Brasil)")
 
-# --- MENSAGENS TEMPORÁRIAS (some depois de alguns segundos) ---
-import time
+    top10 = df_ranking.head(10)
+    top10["Código da Microrregião"] = top10["Código da Microrregião"].astype(str)
+    df_top10 = geo_df[geo_df["Código da Microrregião"].isin(top10["Código da Microrregião"])]
 
-def show_message(msg, delay=3):
-    msg_container = st.empty()
-    msg_container.success(msg)
-    time.sleep(delay)
-    msg_container.empty()
+    gdf_top10 = gpd.GeoDataFrame(df_top10).set_index("Código da Microrregião")
+    geojson_top10 = json.loads(gdf_top10.to_json())
 
-# Exemplo:
-# show_message("🚀 Dados prontos!", delay=3)
+    fig = px.choropleth(
+        df_top10,
+        geojson=geojson_top10,
+        locations="Código da Microrregião",
+        color="IQM FINAL",
+        hover_name="Microrregião",
+        projection="mercator",
+        color_continuous_scale="YlGnBu"
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Ranking do Top 10
+    top10_view = df_top10[["Microrregião", "UF", "IQM FINAL"]].sort_values(by="IQM FINAL", ascending=False).reset_index(drop=True)
+    top10_view.index += 1
+    st.dataframe(top10_view.style.background_gradient(cmap="YlGnBu", subset=["IQM FINAL"]), use_container_width=True)
+
+# Detalhes por Microrregião
+if ind_sel != "Top 10 Microregiões (Ranking IQM)":
+    micros = sorted(df_uf["Microrregião"].unique())
+    mic_sel = st.selectbox("Selecione uma Microrregião para detalhes:", micros)
+    df_micro = df_uf[df_uf["Microrregião"] == mic_sel]
+    st.write(df_micro.T.iloc[-4:])
+
+# Tabela completa
+with st.expander("📁 Ver tabela completa"):
+    st.dataframe(df_uf, use_container_width=True)
