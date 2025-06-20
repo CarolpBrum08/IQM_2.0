@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import requests
-import zipfile
 import io
 import folium
 from streamlit_folium import st_folium
@@ -19,22 +18,20 @@ st.set_page_config(
 # TÍTULO
 st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
 
-# --- LINK DO SHAPEFILE E PLANILHA ---
+# --- LINKS DO GEOJSON E PLANILHA ---
 
-# SHAPEFILE (zip do Dropbox com dl=1 para forçar download)
-shapefile_url = "https://www.dropbox.com/scl/fi/9ykpfmts35d0ct0ufh7c6/BR_Microrregioes_2022.zip?rlkey=kjbpqi3f6aeun4ctscae02k9e&st=she208vj&dl=1"
+# GeoJSON
+geojson_url = "https://www.dropbox.com/scl/fi/zxqlidj8bl90zfoyg903q/BR_Microrregioes_2022.json?rlkey=146tfdmyvgh58bu5p11zycuko&st=geevr72o&dl=1"
 
-# PLANILHA (arquivo .xlsm)
+# Planilha Excel
 excel_url = "https://www.dropbox.com/scl/fi/b1wxo02asus661r6k6kjb/IQM_BRASIL_2025_V1.xlsm?rlkey=vsu1wm2mi768vqgjknpmbee70&st=8722gdyh&dl=1"
 
-# --- FUNÇÃO: CARREGAR SHAPEFILE REMOTO ---
+# --- FUNÇÃO: CARREGAR GEOJSON REMOTO ---
 @st.cache_data(show_spinner=False)
-def load_shapefile(url):
+def load_geojson(url):
     r = requests.get(url)
     r.raise_for_status()
-    z = zipfile.ZipFile(io.BytesIO(r.content))
-    shapefile = [name for name in z.namelist() if name.endswith('.shp')][0]
-    gdf = gpd.read_file(f"zip://{url}")
+    gdf = gpd.read_file(io.BytesIO(r.content))
     return gdf
 
 # --- FUNÇÃO: CARREGAR PLANILHA REMOTA ---
@@ -47,9 +44,9 @@ def load_excel(url):
     return df_qualificacao, df_ranking
 
 # --- CARREGA DADOS ---
-with st.spinner("🔄 Carregando shapefile..."):
-    gdf = load_shapefile(shapefile_url)
-st.success("✅ Shapefile carregado com sucesso!", icon="✅")
+with st.spinner("🔄 Carregando GeoJSON..."):
+    gdf = load_geojson(geojson_url)
+st.success("✅ GeoJSON carregado com sucesso!", icon="✅")
 
 with st.spinner("🔄 Carregando planilha..."):
     df_qualificacao, df_ranking = load_excel(excel_url)
