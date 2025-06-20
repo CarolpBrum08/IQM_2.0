@@ -4,6 +4,7 @@ import geopandas as gpd
 import requests
 import json
 import plotly.express as px
+import io
 
 # CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(
