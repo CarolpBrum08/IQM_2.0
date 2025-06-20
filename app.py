@@ -4,13 +4,12 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import requests
-import json
-import folium
-from streamlit_folium import st_folium
-from io import BytesIO
-import time
+import zipfile
+import io
+import os
+import plotly.express as px
 
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIG DA PÁGINA
 st.set_page_config(
     page_title="IQM 2025 - Comparador de Microrregiões",
     page_icon="📍",
@@ -20,116 +19,99 @@ st.set_page_config(
 # TÍTULO
 st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
 
-# LINKS
-json_micro_url = "https://www.dropbox.com/scl/fi/zxqlidj8bl90zfoyg903q/BR_Microrregioes_2022.json?rlkey=146tfdmyvgh58bu5p11zycuko&st=geevr72o&dl=1"
-zip_uf_url = "https://www.dropbox.com/scl/fi/59ca4fup55cu3utng68df/BR_UF_2024.zip?rlkey=36m2xsdv0aspalu7zvs2oleuy&st=xlxaq39z&dl=1"
+# --- LINKS ---
+
+shapefile_url = "https://www.dropbox.com/scl/fi/9ykpfmts35d0ct0ufh7c6/BR_Microrregioes_2022.zip?rlkey=kjbpqi3f6aeun4ctscae02k9e&st=she208vj&dl=1"
+uf_url = "https://www.dropbox.com/scl/fi/59ca4fup55cu3utng68df/BR_UF_2024.zip?rlkey=36m2xsdv0aspalu7zvs2oleuy&st=xlxaq39z&dl=1"
 excel_url = "https://www.dropbox.com/scl/fi/b1wxo02asus661r6k6kjb/IQM_BRASIL_2025_V1.xlsm?rlkey=vsu1wm2mi768vqgjknpmbee70&st=8722gdyh&dl=1"
 
-# FUNÇÃO: LOAD GEOJSON MICRORREGIÕES
+# --- LOAD SHAPEFILE ZIP ---
 @st.cache_data(show_spinner=False)
-def load_micro_json(url):
+def load_shapefile_zip(url):
     r = requests.get(url)
     r.raise_for_status()
-    gdf = gpd.read_file(BytesIO(r.content))
+
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    z.extractall("geo_tmp")
+
+    shp_path = [f for f in os.listdir("geo_tmp") if f.endswith(".shp")][0]
+    full_path = os.path.join("geo_tmp", shp_path)
+
+    gdf = gpd.read_file(full_path).to_crs(epsg=4326)
     return gdf
 
-# FUNÇÃO: LOAD UF (ZIP COM SHAPEFILE)
-@st.cache_data(show_spinner=False)
-def load_uf_shapefile(url):
-    r = requests.get(url)
-    r.raise_for_status()
-    z = zipfile.ZipFile(BytesIO(r.content))
-    shp_path = [f for f in z.namelist() if f.endswith('.shp')][0]
-    gdf = gpd.read_file(f"zip://{url}")
-    return gdf
-
-# FUNÇÃO: LOAD PLANILHA
+# --- LOAD EXCEL ---
 @st.cache_data(show_spinner=False)
 def load_excel(url):
     r = requests.get(url)
     r.raise_for_status()
-    df_qualificacao = pd.read_excel(BytesIO(r.content), sheet_name="IQM_Qualificação")
-    df_ranking = pd.read_excel(BytesIO(r.content), sheet_name="IQM_Ranking")
-    return df_qualificacao, df_ranking
+    df_qualif = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Qualificação", header=3)
+    df_ranking = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Ranking")
+    return df_qualif, df_ranking
 
-# CARREGA OS DADOS
-with st.spinner("🔄 Carregando microrregiões..."):
-    gdf_micro = load_micro_json(json_micro_url)
+# --- LOAD DATA ---
+with st.spinner("🔄 Carregando Microrregiões..."):
+    gdf = load_shapefile_zip(shapefile_url)
 
-with st.spinner("🔄 Carregando estados (UF)..."):
-    gdf_uf = gpd.read_file(f"zip://{zip_uf_url}")
+with st.spinner("🔄 Carregando UFs..."):
+    gdf_uf = load_shapefile_zip(uf_url)
 
 with st.spinner("🔄 Carregando planilha..."):
-    df_qualificacao, df_ranking = load_excel(excel_url)
+    df_qualif, df_ranking = load_excel(excel_url)
 
-# INTERFACE
-ufs = sorted(gdf_micro["UF"].unique())
-uf_selecionada = st.selectbox("Selecione o Estado (UF):", ufs)
+# --- AJUSTE DE COLUNAS ---
+df_ranking["Código da Microrregião"] = df_ranking["Código da Microrregião"].astype(str)
+if "CD_MICRO" in gdf.columns:
+    gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
+    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
+else:
+    gdf["CD_MICRO"] = gdf[gdf.columns[0]].astype(str)
+    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
 
-micros_disponiveis = gdf_micro[gdf_micro["UF"] == uf_selecionada]["NM_MICRO"].unique()
-micros_selecionadas = st.multiselect(
-    "Selecione Microrregiões para comparar:",
-    options=sorted(micros_disponiveis)
-)
+geo_df = gpd.GeoDataFrame(geo_df, geometry="geometry")
 
-# MAPA
-if len(micros_selecionadas) > 0:
+# --- INTERFACE ---
 
-    st.markdown("### 🗺️ Mapa das Microrregiões Selecionadas")
+# FILTRO UF
+ufs = sorted(df_ranking["UF"].unique())
+uf_sel = st.selectbox("Selecione o Estado (UF):", ufs)
 
-    gdf_micro_sel = gdf_micro[
-        (gdf_micro["UF"] == uf_selecionada) &
-        (gdf_micro["NM_MICRO"].isin(micros_selecionadas))
-    ]
+# FILTRO INDICADOR
+indicadores = [
+    "IQM / 2025",
+    "IQM-D",
+    "IQM-C",
+    "IQM-IU"
+]
+indicador_sel = st.selectbox("Selecione o Indicador:", indicadores)
 
-    gdf_uf_sel = gdf_uf[gdf_uf["NM_UF"] == uf_selecionada]
+# FILTRO MICRORREGIÕES
+df_uf = df_ranking[df_ranking["UF"] == uf_sel]
+micro_sel = st.multiselect("Selecione Microrregiões para comparar:", df_uf["Microrregião"].unique())
 
-    m = folium.Map(location=[-14.2350, -51.9253], zoom_start=5, tiles="cartodbpositron")
+df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micro_sel))]
+geo_sel = geo_df[geo_df["Microrregião"].isin(micro_sel)]
 
-    # Fundo do Estado
-    folium.GeoJson(gdf_uf_sel, name="Estado", style_function=lambda x: {
-        'fillColor': '#f5f5f5',
-        'color': '#000',
-        'weight': 1,
-        'fillOpacity': 0.2
-    }).add_to(m)
+# --- MAPA COM PLOTLY ---
+if not geo_sel.empty:
+    st.subheader("🗺️ Mapa das Microregiões Selecionadas")
+    fig = px.choropleth(
+        geo_sel,
+        geojson=geo_sel.__geo_interface__,
+        locations="Código da Microrregião",
+        color=indicador_sel,
+        hover_name="Microrregião",
+        projection="mercator",
+        color_continuous_scale="YlOrBr"
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Microrregiões Selecionadas
-    folium.GeoJson(
-        gdf_micro_sel,
-        name="Microrregiões",
-        tooltip=folium.GeoJsonTooltip(fields=["NM_MICRO"]),
-        style_function=lambda x: {
-            'fillColor': '#FF5733',
-            'color': '#FF5733',
-            'weight': 2,
-            'fillOpacity': 0.5
-        }
-    ).add_to(m)
-
-    st_folium(m, width=1000, height=600)
-
-    # INDICADORES
-    st.markdown("### 📊 Indicadores das Microrregiões Selecionadas")
-
-    df_sel = df_ranking[
-        (df_ranking["UF"] == uf_selecionada) &
-        (df_ranking["Microrregião"].isin(micros_selecionadas))
-    ]
-
-    cols = st.columns(len(df_sel))
-
-    for i, row in df_sel.iterrows():
-        nome = row["Microrregião"]
-        iqm = row["IQM / 2025"]
-        cols[i % len(cols)].metric(nome, round(iqm, 2))
-
-    # RANKING
-    st.markdown("### 🏆 Ranking das Microrregiões")
-
-    df_rank = df_sel[["Microrregião", "IQM / 2025"]].sort_values(by="IQM / 2025", ascending=False)
+    # --- RANKING ---
+    st.subheader("🏆 Ranking das Microrregiões Selecionadas")
+    df_rank = df_sel[["Microrregião", indicador_sel]].sort_values(by=indicador_sel, ascending=False).reset_index(drop=True)
     st.dataframe(df_rank, use_container_width=True)
 
 else:
     st.info("Selecione uma ou mais microrregiões para visualizar.")
-
