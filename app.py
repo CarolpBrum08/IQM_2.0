@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import geopandas as gpd
 import requests
 import json
 import plotly.express as px
@@ -26,16 +25,15 @@ df_url = "https://www.dropbox.com/scl/fi/b1wxo02asus661r6k6kjb/IQM_BRASIL_2025_V
 
 # --- FUNÇÕES ---
 
-@st.cache_data(show_spinner=False)
-def load_geojson(url):
-    response = requests.get(url)
+@st.cache_resource(show_spinner=True)
+def load_geojson():
+    response = requests.get(geofile_url)
     response.raise_for_status()
-    geojson = json.loads(response.content)
-    return geojson
+    return json.loads(response.content)
 
-@st.cache_data(show_spinner=False)
-def load_planilha(url):
-    r = requests.get(url)
+@st.cache_data(show_spinner=True)
+def load_planilha():
+    r = requests.get(df_url)
     r.raise_for_status()
     df_ranking = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Ranking")
     return df_ranking
@@ -43,10 +41,10 @@ def load_planilha(url):
 # --- CARREGAR DADOS ---
 
 with st.spinner("🔄 Carregando GeoJSON..."):
-    geojson_data = load_geojson(geofile_url)
+    geojson_data = load_geojson()
 
 with st.spinner("🔄 Carregando planilha..."):
-    df_ranking = load_planilha(df_url)
+    df_ranking = load_planilha()
 
 # --- INTERFACE ---
 
