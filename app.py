@@ -73,14 +73,13 @@ if len(micros_sel) > 0:
 
     st.subheader("🌍 Mapa das Microrregiões Selecionadas")
 
-    fig = px.choropleth_mapbox(
+    fig = px.choropleth_map(
         df_sel,
         geojson=geojson_data,
         locations="Código da Microrregião",
         featureidkey="properties.CD_MICRO",
         color=indicador_sel,
         hover_name="Microrregião",
-        mapbox_style="carto-positron",
         center={"lat": -15, "lon": -53},
         zoom=4.5,
         color_continuous_scale="YlOrBr",
