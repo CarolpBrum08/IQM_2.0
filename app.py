@@ -1,99 +1,145 @@
 import streamlit as st
 import pandas as pd
-import geopandas as gpd
+import requests # Mantido por precaução, caso use para outras APIs no futuro
+import json
 import plotly.express as px
-import zipfile
 import io
-import requests
-import os
+import os # Para verificar se os arquivos locais existem
 
-# Configuração da página
-st.set_page_config(layout="wide", page_title="Comparador de Microregiões - IQM 2025")
+# CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(
+    page_title="IQM 2025 - Comparador de Microrregiões",
+    page_icon="📍",
+    layout="wide"
+)
 
-# URL do shapefile zipado
-URL_ZIP = "https://www.dropbox.com/scl/fi/ij1y8m3bwn6voyr7xrj4p/BR_RG_Imediatas_2024.zip?rlkey=npfrxoci8ufu2zap40grp8zxr&st=hhzu0dup&dl=1"
+# TÍTULO
+st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
 
-# Função para baixar e extrair o zip
-@st.cache_data
-def load_geo_from_zip(url):
-    st.info("🔄 Baixando shapefile zipado...")
-    r = requests.get(url)
-    z = zipfile.ZipFile(io.BytesIO(r.content))
-    z.extractall("data/geo")
-    shapefiles = [f for f in os.listdir("data/geo") if f.endswith(".shp")]
-    if not shapefiles:
-        st.error("Nenhum .shp encontrado no ZIP!")
+# --- CAMINHOS LOCAIS DOS DADOS ---
+# ATENÇÃO: Estes caminhos agora apontam para os arquivos DENTRO do seu repositório Git!
+geojson_local_path = "data/BR_Microrregioes_2022.json"
+planilha_local_path = "data/IQM_BRASIL_2025_V1.xlsm"
+
+# --- FUNÇÕES ---
+
+@st.cache_resource(show_spinner=True)
+def load_geojson_local():
+    """
+    Carrega o arquivo GeoJSON das microrregiões de um caminho local.
+    """
+    if not os.path.exists(geojson_local_path):
+        st.error(f"Erro: O arquivo GeoJSON não foi encontrado em '{geojson_local_path}'. "
+                 "Verifique se ele foi adicionado corretamente ao repositório na pasta 'data'.")
+        st.stop() # Interrompe a execução do Streamlit se o arquivo não estiver lá
+    try:
+        with open(geojson_local_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        st.error(f"Erro ao decodificar JSON do arquivo '{geojson_local_path}'. "
+                 "Verifique a validade do arquivo GeoJSON.")
         st.stop()
-    shp_path = os.path.join("data/geo", shapefiles[0])
-    gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
-    return gdf
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado ao carregar o GeoJSON: {e}")
+        st.stop()
 
-# Função para carregar a planilha
-@st.cache_data
-def load_excel():
-    df_qualif = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
-    df_ranking = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
-    return df_qualif, df_ranking
 
-# Carregar dados
-gdf = load_geo_from_zip(URL_ZIP)
-df_qualif, df_ranking = load_excel()
+@st.cache_data(show_spinner=True)
+def load_planilha_local():
+    """
+    Carrega a planilha IQM de um caminho local.
+    """
+    if not os.path.exists(planilha_local_path):
+        st.error(f"Erro: A planilha IQM não foi encontrada em '{planilha_local_path}'. "
+                 "Verifique se ela foi adicionada corretamente ao repositório na pasta 'data'.")
+        st.stop() # Interrompe a execução do Streamlit se o arquivo não estiver lá
+    try:
+        df_ranking = pd.read_excel(planilha_local_path, sheet_name="IQM_Ranking")
+        return df_ranking
+    except FileNotFoundError: # Já coberto pelo os.path.exists, mas como fallback
+        st.error(f"Erro: O arquivo da planilha não foi encontrado em '{planilha_local_path}'.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado ao carregar a planilha: {e}")
+        st.stop()
 
-# Ajuste para merge
-df_qualif["Código da Microrregião"] = df_qualif["Código da Microrregião"].astype(str)
-df_ranking["Código da Microrregião"] = df_ranking["Código da Microrregião"].astype(str)
 
-# Ajuste no GeoDataFrame
-if "CD_MICRO" in gdf.columns:
-    gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
-    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
-else:
-    # fallback: tentar usar outra coluna
-    gdf["CD_MICRO"] = gdf[gdf.columns[0]].astype(str)
-    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
+# --- CARREGAR DADOS ---
 
-geo_df = gpd.GeoDataFrame(geo_df, geometry="geometry")
+with st.spinner("🔄 Carregando GeoJSON localmente..."):
+    geojson_data = load_geojson_local()
 
-# Título
-st.title("📍 Comparador de Microregiões - IQM 2025")
+with st.spinner("🔄 Carregando planilha localmente..."):
+    df_ranking = load_planilha_local()
 
-# Filtros
+# --- INTERFACE ---
+
+# Filtro Estado
+# Garante que a coluna "UF" e "Microrregião" existem antes de tentar usá-las
+if "UF" not in df_ranking.columns or df_ranking["UF"].empty:
+    st.error("Coluna 'UF' não encontrada ou vazia na planilha. Verifique a planilha.")
+    st.stop()
+if "Microrregião" not in df_ranking.columns:
+    st.error("Coluna 'Microrregião' não encontrada na planilha. Verifique a planilha.")
+    st.stop()
+if "Código da Microrregião" not in df_ranking.columns:
+    st.error("Coluna 'Código da Microrregião' não encontrada na planilha. É essencial para o mapa.")
+    st.stop()
+
 ufs = sorted(df_ranking["UF"].unique())
 uf_sel = st.selectbox("Selecione o Estado (UF):", ufs)
 
-df_uf = df_ranking[df_ranking["UF"] == uf_sel]
-micro_sel = st.multiselect("Selecione Microregiões para comparar:", df_uf["Microrregião"].unique())
+# Filtro Indicador
+indicadores = [
+    "IQM / 2025",
+    "IQM-D",
+    "IQM-C",
+    "IQM-IU"
+]
+indicador_sel = st.selectbox("Selecione o Indicador:", indicadores)
 
-df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micro_sel))]
-geo_sel = geo_df[geo_df["Microrregião"].isin(micro_sel)]
+# Filtro Microrregião
+micros = df_ranking[df_ranking["UF"] == uf_sel]["Microrregião"].unique()
+micros_sel = st.multiselect("Selecione Microrregiões para comparar:", sorted(micros))
 
-# Mapa
-if not geo_sel.empty:
-    st.subheader("🗺️ Mapa das Microregiões Selecionadas")
-    fig = px.choropleth(
-        geo_sel,
-        geojson=geo_sel.__geo_interface__,
-        locations="Código da Microrregião",
-        color="IQM / 2025",
+
+# --- EXIBIR MAPA ---
+
+if len(micros_sel) > 0:
+
+    df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micros_sel))]
+
+    st.subheader("🌍 Mapa das Microrregiões Selecionadas")
+
+    # O featureidkey 'properties.CD_MICRO' é o nome da propriedade no GeoJSON
+    # Certifique-se que o GeoJSON tem essa estrutura e que 'CD_MICRO' é o código da microrregião.
+    # Se o seu GeoJSON tiver um nome de campo diferente para o código da microrregião,
+    # você precisará ajustar 'properties.CD_MICRO' aqui.
+
+    fig = px.choropleth_map(
+        df_sel,
+        geojson=geojson_data,
+        locations="Código da Microrregião", # Coluna no DataFrame com o ID da microrregião
+        featureidkey="properties.CD_MICRO", # Caminho para o ID no GeoJSON
+        color=indicador_sel,
         hover_name="Microrregião",
-        projection="mercator",
-        color_continuous_scale="YlOrBr"
+        center={"lat": -15, "lon": -53},
+        zoom=4.5,
+        color_continuous_scale="YlOrBr",
+        height=500
     )
-    fig.update_geos(fitbounds="locations", visible=False)
-    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+
+    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+
     st.plotly_chart(fig, use_container_width=True)
 
-    # Cards
-    st.subheader("📊 Indicadores das Microregiões Selecionadas")
-    cols = st.columns(4)
-    cols[0].metric("IQM TOTAL", round(df_sel["IQM / 2025"].mean(), 2))
-    cols[1].metric("IQM-D", round(df_sel["IQM-D"].mean(), 2))
-    cols[2].metric("IQM-C", round(df_sel["IQM-C"].mean(), 2))
-    cols[3].metric("IQM-IU", round(df_sel["IQM-IU"].mean(), 2))
+    # --- RANKING ---
+    st.subheader("🏆 Ranking das Microrregiões Selecionadas")
 
-    # Tabela
-    st.subheader("📋 Tabela Qualificação - Detalhe das Selecionadas")
-    df_qualif_sel = df_qualif[df_qualif["Microrregião"].isin(micro_sel)]
-    st.dataframe(df_qualif_sel, use_container_width=True)
+    df_rank = df_sel[["Microrregião", indicador_sel]]
+    df_rank = df_rank.sort_values(by=indicador_sel, ascending=False).reset_index(drop=True)
+
+    st.dataframe(df_rank, use_container_width=True)
+
 else:
-    st.warning("Selecione uma ou mais microregiões para visualizar.")
+    st.warning("Selecione uma ou mais microrregiões para visualizar.")
