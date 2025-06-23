@@ -1,102 +1,99 @@
 import streamlit as st
 import pandas as pd
-import requests
-import json
+import geopandas as gpd
 import plotly.express as px
+import zipfile
 import io
+import requests
+import os
 
-# CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(
-    page_title="IQM 2025 - Comparador de Microrregiões",
-    page_icon="📍",
-    layout="wide"
-)
+# Configuração da página
+st.set_page_config(layout="wide", page_title="Comparador de Microregiões - IQM 2025")
 
-# TÍTULO
-st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
+# URL do shapefile zipado
+URL_ZIP = "https://www.dropbox.com/scl/fi/ij1y8m3bwn6voyr7xrj4p/BR_RG_Imediatas_2024.zip?rlkey=npfrxoci8ufu2zap40grp8zxr&st=hhzu0dup&dl=1"
 
-# --- URLS ---
+# Função para baixar e extrair o zip
+@st.cache_data
+def load_geo_from_zip(url):
+    st.info("🔄 Baixando shapefile zipado...")
+    r = requests.get(url)
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    z.extractall("data/geo")
+    shapefiles = [f for f in os.listdir("data/geo") if f.endswith(".shp")]
+    if not shapefiles:
+        st.error("Nenhum .shp encontrado no ZIP!")
+        st.stop()
+    shp_path = os.path.join("data/geo", shapefiles[0])
+    gdf = gpd.read_file(shp_path).to_crs(epsg=4326)
+    return gdf
 
-# GeoJSON (direto do Dropbox)
-geofile_url = "https://www.dropbox.com/scl/fi/zxqlidj8bl90zfoyg903q/BR_Microrregioes_2022.json?rlkey=146tfdmyvgh58bu5p11zycuko&st=geevr72o&dl=1"
+# Função para carregar a planilha
+@st.cache_data
+def load_excel():
+    df_qualif = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Qualificação", header=3)
+    df_ranking = pd.read_excel("data/IQM_BRASIL_2025_V1.xlsm", sheet_name="IQM_Ranking")
+    return df_qualif, df_ranking
 
-# Planilha IQM
-df_url = "https://www.dropbox.com/scl/fi/b1wxo02asus661r6k6kjb/IQM_BRASIL_2025_V1.xlsm?rlkey=vsu1wm2mi768vqgjknpmbee70&st=8722gdyh&dl=1"
+# Carregar dados
+gdf = load_geo_from_zip(URL_ZIP)
+df_qualif, df_ranking = load_excel()
 
-# --- FUNÇÕES ---
+# Ajuste para merge
+df_qualif["Código da Microrregião"] = df_qualif["Código da Microrregião"].astype(str)
+df_ranking["Código da Microrregião"] = df_ranking["Código da Microrregião"].astype(str)
 
-@st.cache_resource(show_spinner=True)
-def load_geojson():
-    response = requests.get(geofile_url)
-    response.raise_for_status()
-    return json.loads(response.content)
+# Ajuste no GeoDataFrame
+if "CD_MICRO" in gdf.columns:
+    gdf["CD_MICRO"] = gdf["CD_MICRO"].astype(str)
+    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
+else:
+    # fallback: tentar usar outra coluna
+    gdf["CD_MICRO"] = gdf[gdf.columns[0]].astype(str)
+    geo_df = pd.merge(df_ranking, gdf, left_on="Código da Microrregião", right_on="CD_MICRO")
 
-@st.cache_data(show_spinner=True)
-def load_planilha():
-    r = requests.get(df_url)
-    r.raise_for_status()
-    df_ranking = pd.read_excel(io.BytesIO(r.content), sheet_name="IQM_Ranking")
-    return df_ranking
+geo_df = gpd.GeoDataFrame(geo_df, geometry="geometry")
 
-# --- CARREGAR DADOS ---
+# Título
+st.title("📍 Comparador de Microregiões - IQM 2025")
 
-with st.spinner("🔄 Carregando GeoJSON..."):
-    geojson_data = load_geojson()
-
-with st.spinner("🔄 Carregando planilha..."):
-    df_ranking = load_planilha()
-
-# --- INTERFACE ---
-
-# Filtro Estado
+# Filtros
 ufs = sorted(df_ranking["UF"].unique())
 uf_sel = st.selectbox("Selecione o Estado (UF):", ufs)
 
-# Filtro Indicador
-indicadores = [
-    "IQM / 2025",
-    "IQM-D",
-    "IQM-C",
-    "IQM-IU"
-]
-indicador_sel = st.selectbox("Selecione o Indicador:", indicadores)
+df_uf = df_ranking[df_ranking["UF"] == uf_sel]
+micro_sel = st.multiselect("Selecione Microregiões para comparar:", df_uf["Microrregião"].unique())
 
-# Filtro Microrregião
-micros = df_ranking[df_ranking["UF"] == uf_sel]["Microrregião"].unique()
-micros_sel = st.multiselect("Selecione Microrregiões para comparar:", sorted(micros))
+df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micro_sel))]
+geo_sel = geo_df[geo_df["Microrregião"].isin(micro_sel)]
 
-# --- EXIBIR MAPA ---
-
-if len(micros_sel) > 0:
-
-    df_sel = df_ranking[(df_ranking["UF"] == uf_sel) & (df_ranking["Microrregião"].isin(micros_sel))]
-
-    st.subheader("🌍 Mapa das Microrregiões Selecionadas")
-
-    fig = px.choropleth_map(
-        df_sel,
-        geojson=geojson_data,
+# Mapa
+if not geo_sel.empty:
+    st.subheader("🗺️ Mapa das Microregiões Selecionadas")
+    fig = px.choropleth(
+        geo_sel,
+        geojson=geo_sel.__geo_interface__,
         locations="Código da Microrregião",
-        featureidkey="properties.CD_MICRO",
-        color=indicador_sel,
+        color="IQM / 2025",
         hover_name="Microrregião",
-        center={"lat": -15, "lon": -53},
-        zoom=4.5,
-        color_continuous_scale="YlOrBr",
-        height=500
+        projection="mercator",
+        color_continuous_scale="YlOrBr"
     )
-
-    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- RANKING ---
-    st.subheader("🏆 Ranking das Microrregiões Selecionadas")
+    # Cards
+    st.subheader("📊 Indicadores das Microregiões Selecionadas")
+    cols = st.columns(4)
+    cols[0].metric("IQM TOTAL", round(df_sel["IQM / 2025"].mean(), 2))
+    cols[1].metric("IQM-D", round(df_sel["IQM-D"].mean(), 2))
+    cols[2].metric("IQM-C", round(df_sel["IQM-C"].mean(), 2))
+    cols[3].metric("IQM-IU", round(df_sel["IQM-IU"].mean(), 2))
 
-    df_rank = df_sel[["Microrregião", indicador_sel]]
-    df_rank = df_rank.sort_values(by=indicador_sel, ascending=False).reset_index(drop=True)
-
-    st.dataframe(df_rank, use_container_width=True)
-
+    # Tabela
+    st.subheader("📋 Tabela Qualificação - Detalhe das Selecionadas")
+    df_qualif_sel = df_qualif[df_qualif["Microrregião"].isin(micro_sel)]
+    st.dataframe(df_qualif_sel, use_container_width=True)
 else:
-    st.warning("Selecione uma ou mais microrregiões para visualizar.")
+    st.warning("Selecione uma ou mais microregiões para visualizar.")
