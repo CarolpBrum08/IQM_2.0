@@ -18,24 +18,17 @@ st.set_page_config(
 st.markdown("<h1 style='font-size: 40px;'>📍 Comparador de Microrregiões - IQM 2025</h1>", unsafe_allow_html=True)
 
 # --- CAMINHOS LOCAIS DOS DADOS ---
-# ATENÇÃO: O nome do GeoJSON foi atualizado para BR_Microrregioes_2022.1.json
 GEOJSON_MICRORREGIOES_PATH = "data/BR_Microrregioes_2022.1.json"
-EXCEL_IQM_PATH = "data/IQM_BRASIL_2025_V1.xlsm" # Ajuste se o nome da aba for diferente de "IQM_Ranking"
+EXCEL_IQM_PATH = "data/IQM_BRASIL_2025_V1.xlsm"
 
 # --- FUNÇÕES PARA CARREGAMENTO DE DADOS (COM CACHE) ---
 
-# st.cache_resource é usado para objetos que não mudam (como um dicionário GeoJSON grande)
-# Ele armazena o recurso em cache, economizando tempo em execuções futuras.
 @st.cache_resource(show_spinner="🔄 Carregando GeoJSON das Microrregiões...")
 def load_geojson_local(path):
-    """
-    Carrega o arquivo GeoJSON das microrregiões de um caminho local.
-    Inclui tratamento de erros para arquivo não encontrado ou JSON inválido.
-    """
     if not os.path.exists(path):
         st.error(f"Erro: O arquivo GeoJSON não foi encontrado em '{path}'. "
                  "Verifique se ele foi adicionado corretamente ao repositório na pasta 'data'.")
-        st.stop() # Interrompe a execução do Streamlit se o arquivo não estiver lá
+        st.stop()
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -47,25 +40,15 @@ def load_geojson_local(path):
         st.error(f"Ocorreu um erro inesperado ao carregar o GeoJSON: {e}")
         st.stop()
 
-# st.cache_data é usado para DataFrames ou outros dados que podem ser processados
-# Ele armazena o DataFrame em cache.
 @st.cache_data(show_spinner="🔄 Carregando Planilha IQM...")
 def load_planilha_local(path):
-    """
-    Carrega a planilha IQM de um caminho local.
-    Espera uma aba chamada "IQM_Ranking" por padrão.
-    """
     if not os.path.exists(path):
         st.error(f"Erro: A planilha IQM não foi encontrada em '{path}'. "
                  "Verifique se ela foi adicionada corretamente ao repositório na pasta 'data'.")
-        st.stop() # Interrompe a execução do Streamlit se o arquivo não estiver lá
+        st.stop()
     try:
-        # Certifique-se que 'sheet_name' corresponde ao nome real da aba com os dados de ranking
         df_ranking = pd.read_excel(path, sheet_name="IQM_Ranking", engine='openpyxl')
         return df_ranking
-    except FileNotFoundError: # Já coberto pelo os.path.exists, mas como fallback
-        st.error(f"Erro: O arquivo da planilha não foi encontrado em '{path}'.")
-        st.stop()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado ao carregar a planilha: {e}")
         st.stop()
@@ -74,11 +57,10 @@ def load_planilha_local(path):
 geojson_data = load_geojson_local(GEOJSON_MICRORREGIOES_PATH)
 df_ranking = load_planilha_local(EXCEL_IQM_PATH)
 
-# --- ADICIONE ESTA LINHA PARA CONVERTER O CÓDIGO DA MICRORREGIÃO PARA STRING ---
-df_ranking['Código da Microrregião'] = df_ranking['Código da Microrregião'].astype(str)
+# --- CONVERTE O CÓDIGO DA MICRORREGIÃO PARA STRING E GARANTE QUE NÃO HÁ ESPAÇOS EXTRAS ---
+df_ranking['Código da Microrregião'] = df_ranking['Código da Microrregião'].astype(str).str.strip()
 
 # --- VERIFICAÇÃO DE COLUNAS ESSENCIAIS NO DATAFRAME ---
-# Se o nome das colunas no seu Excel for diferente, ajuste aqui!
 required_cols = ["UF", "Microrregião", "Código da Microrregião"]
 for col in required_cols:
     if col not in df_ranking.columns:
@@ -89,84 +71,80 @@ if df_ranking["UF"].empty:
     st.error("Coluna 'UF' está vazia na planilha. Não é possível filtrar por estado.")
     st.stop()
 
+# --- LISTA DE TODOS OS INDICADORES IQM (para a tabela) ---
+# Adicione ou remova indicadores aqui conforme as colunas da sua planilha.
+TODOS_INDICADORES_IQM = [
+    "IQM / 2025", "IQM-D", "IQM-C", "IQM-IU", # Adicione mais se tiver
+]
+# Garante que só indicadores que existem no DF sejam usados
+TODOS_INDICADORES_IQM = [ind for ind in TODOS_INDICADORES_IQM if ind in df_ranking.columns]
+
+
 # --- INTERFACE (SIDEBAR) ---
 st.sidebar.header("Filtros de Seleção")
 
-# Filtro Estado (UF)
+# Filtro Estados (UF) - AGORA MULTISELECT
 ufs = sorted(df_ranking["UF"].unique().tolist())
-uf_sel = st.sidebar.selectbox("Selecione o Estado (UF):", ufs)
+# Adicionado valor padrão para garantir que sempre haja um estado selecionado ao iniciar
+# ou se o usuário desmarcar todos.
+ufs_sel = st.sidebar.multiselect("Selecione os Estados (UF):", ufs, default=ufs[0] if ufs else [])
 
-# Filtro Indicador
-# Adapte esta lista para incluir APENAS os nomes EXATOS dos seus indicadores no Excel!
-indicadores_disponiveis = [
-    "IQM / 2025", "IQM-D", "IQM-C", "IQM-IU"
-]
-# Filtra para garantir que apenas indicadores existentes no DataFrame sejam mostrados
-indicadores_disponiveis = [ind for ind in indicadores_disponiveis if ind in df_ranking.columns]
+if not ufs_sel:
+    st.sidebar.warning("Por favor, selecione pelo menos um Estado.")
+    st.stop()
 
-if not indicadores_disponiveis:
-    st.sidebar.error("Nenhum indicador válido encontrado no DataFrame. Verifique os nomes das colunas na planilha e na lista de indicadores.")
-    st.stop() # Interrompe se não houver indicadores para evitar erros
+# Filtro Indicador para COLORIR O MAPA (ainda um selectbox simples)
+# Este é o indicador que irá determinar a cor no mapa.
+indicadores_disponiveis_mapa = [ind for ind in TODOS_INDICADORES_IQM] # Usa a lista completa de IQMs
+indicador_sel_mapa = st.sidebar.selectbox("Selecione o Indicador para colorir o Mapa:", indicadores_disponiveis_mapa)
 
-indicador_sel = st.sidebar.selectbox("Selecione o Indicador:", indicadores_disponiveis)
 
-# Filtro Microrregião (Baseado no Estado Selecionado)
-micros_por_uf = df_ranking[df_ranking["UF"] == uf_sel]["Microrregião"].unique().tolist()
-micros_sel = st.sidebar.multiselect("Selecione Microrregiões para comparar:", sorted(micros_por_uf))
+# Filtro Microrregião (Baseado nos Estados Selecionados)
+# Filtra o DataFrame para obter apenas as microrregiões dos estados selecionados
+df_micros_estados_sel = df_ranking[df_ranking["UF"].isin(ufs_sel)]
+micros_por_estados_sel = sorted(df_micros_estados_sel["Microrregião"].unique().tolist())
+
+micros_sel = st.sidebar.multiselect("Selecione Microrregiões para comparar:", micros_por_estados_sel)
 
 # --- LÓGICA DE FILTRAGEM DOS DADOS PARA O MAPA E RANKING ---
-df_sel = df_ranking[df_ranking["UF"] == uf_sel].copy()
+# df_sel agora é filtrado pelos MÚLTIPLOS estados selecionados
+df_sel = df_ranking[df_ranking["UF"].isin(ufs_sel)].copy()
 
-if micros_sel: # Se alguma microrregião foi selecionada
+if micros_sel: # Se alguma microrregião foi selecionada, filtra ainda mais
     df_sel = df_sel[df_sel["Microrregião"].isin(micros_sel)]
 
 # --- VISUALIZAÇÃO DO MAPA ---
 st.subheader("🌍 Mapa das Microrregiões Selecionadas")
 
 if not df_sel.empty:
-   
-    # Ajuste o 'locations' para a coluna exata no seu DataFrame que contém o código da microrregião (ex: 29001)
-    # E o 'featureidkey' para o caminho exato no GeoJSON (geralmente properties.CD_MICRO para IBGE)
-    fig = px.choropleth_map(
+    fig = px.choropleth_map( # Mantido px.choropleth_map
         df_sel,
         geojson=geojson_data,
-        locations="Código da Microrregião", # <--- *** Coluna no seu DF com o ID da microrregião ***
-        featureidkey="properties.CD_MICRO", # <--- *** Caminho para o ID no GeoJSON (CONFIRMADO) ***
-        color=indicador_sel,
+        locations="Código da Microrregião", # Coluna no seu DF com o ID da microrregião
+        featureidkey="properties.CD_MICRO", # Caminho para o ID no GeoJSON (AGORA CORRETO!)
+        color=indicador_sel_mapa, # Usa o indicador selecionado para o mapa
         hover_name="Microrregião",
-        # --- AJUSTES DE ZOOM E CENTRO DO MAPA (UX) ---
-        # Estes são valores FIXOS. Para zoom dinâmico, você precisaria calcular o centroide
-        # e o zoom com base nas microrregiões selecionadas no df_sel.
-        center={"lat": -15, "lon": -53}, # Exemplo: Centro do Brasil. Ajuste para um ponto inicial melhor.
-        zoom=4.5, # Zoom inicial. 4.5 pode ser demais se for Brasil inteiro. Ajuste conforme necessário.
-        # --- FIM AJUSTES DE ZOOM ---
-        color_continuous_scale="YlOrBr", # Escala de cores (pode experimentar outras: Viridis, Plasma, etc.)
+        # --- AJUSTES DE ZOOM E CENTRO DO MAPA PARA O BRASIL ---
+        center={"lat": -15, "lon": -53}, # Centro do Brasil
+        zoom=3.5, # Zoom para abranger o Brasil
+        color_continuous_scale="YlOrBr", # Escala de cores
         height=500 # Altura do mapa em pixels
     )
 
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}) # Remove margens do layout do mapa
     st.plotly_chart(fig, use_container_width=True) # use_container_width=True faz o mapa ocupar a largura disponível
-else:
-    st.info("Selecione um Estado e/ou Microrregiões para visualizar no mapa.")
+# else:
+#     st.info("Selecione um Estado e/ou Microrregiões para visualizar no mapa.") # Removido conforme solicitado
 
 # --- RANKING DAS MICRORREGIÕES ---
 st.subheader("🏆 Ranking das Microrregiões Selecionadas")
 
-# --- AJUSTE DE TEXTO/FORMATACAO (UX) ---
-# Se o problema das "letras" for a formatação dos cabeçalhos da tabela,
-# geralmente o st.dataframe já tenta ser legível. Se ainda houver problemas,
-# pode ser necessário inspecionar com as ferramentas de desenvolvedor do navegador
-# ou usar formatação personalizada no Pandas antes de exibir o DataFrame.
-# Por exemplo: df_rank.rename(columns={'col_antiga': 'Col. Nova Legível'})
-# Ou até usar st.markdown para criar os próprios cabeçalhos se a tabela for pequena.
-# --- FIM AJUSTE DE TEXTO ---
-
 if not df_sel.empty:
-    df_rank = df_sel[["Microrregião", indicador_sel]].copy()
-    df_rank = df_rank.sort_values(by=indicador_sel, ascending=False).reset_index(drop=True)
+    # Mostra Microrregião, UF e TODOS os indicadores IQM
+    df_rank = df_sel[["Microrregião", "UF"] + TODOS_INDICADORES_IQM].copy()
+    # Ordena pelo indicador selecionado no mapa para coerência
+    df_rank = df_rank.sort_values(by=indicador_sel_mapa, ascending=False).reset_index(drop=True)
 
-    # Exibe a tabela interativa
     st.dataframe(df_rank, use_container_width=True)
-else:
-    st.info("Selecione um Estado e/ou Microrregiões para ver o ranking.")
-
+# else:
+#     st.info("Selecione um Estado e/ou Microrregiões para ver o ranking.") # Removido conforme solicitado
