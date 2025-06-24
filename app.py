@@ -74,22 +74,8 @@ def load_planilha_local(path):
 geojson_data = load_geojson_local(GEOJSON_MICRORREGIOES_PATH)
 df_ranking = load_planilha_local(EXCEL_IQM_PATH)
 
-# --- ADICIONE ESTAS LINHAS TEMPORARIAMENTE PARA DEBUG ---
-st.write("--- Debug IDs ---")
-st.write(f"Tipo da coluna 'Código da Microrregião' na planilha: {df_ranking['Código da Microrregião'].dtype}")
-st.write("Primeiros 5 IDs da planilha:")
-st.write(df_ranking['Código da Microrregião'].head())
-
-# Para verificar o GeoJSON, precisamos acessar uma feature. Pegaremos a primeira como exemplo.
-if geojson_data and 'features' in geojson_data and len(geojson_data['features']) > 0:
-    first_feature_id = geojson_data['features'][0]['properties'].get('CD_MICRORR')
-    st.write(f"Tipo do ID 'CD_MICRORR' no GeoJSON (primeira feature): {type(first_feature_id)}")
-    st.write(f"Primeiro ID 'CD_MICRORR' do GeoJSON: {first_feature_id}")
-else:
-    st.write("Não foi possível acessar a primeira feature do GeoJSON para depuração.")
-st.write("-----------------")
-# --- FIM DAS LINHAS DE DEBUG ---
-
+# --- ADICIONE ESTA LINHA PARA CONVERTER O CÓDIGO DA MICRORREGIÃO PARA STRING ---
+df_ranking['Código da Microrregião'] = df_ranking['Código da Microrregião'].astype(str)
 
 # --- VERIFICAÇÃO DE COLUNAS ESSENCIAIS NO DATAFRAME ---
 # Se o nome das colunas no seu Excel for diferente, ajuste aqui!
@@ -136,13 +122,6 @@ if micros_sel: # Se alguma microrregião foi selecionada
 
 # --- VISUALIZAÇÃO DO MAPA ---
 st.subheader("🌍 Mapa das Microrregiões Selecionadas")
-
-# --- ADICIONE ESTA LINHA TEMPORARIAMENTE PARA DEBUG ---
-st.write(f"DataFrame para o mapa está vazio? {df_sel.empty}")
-st.write(f"Número de linhas no DataFrame do mapa: {len(df_sel)}")
-if df_sel.empty:
-    st.write("Verifique seus filtros. Nenhuma microrregião corresponde aos critérios.")
-# --- FIM DA LINHA DE DEBUG ---
 
 if not df_sel.empty:
     # Ajuste o 'locations' para a coluna exata no seu DataFrame que contém o código da microrregião (ex: 29001)
