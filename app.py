@@ -137,6 +137,13 @@ if micros_sel: # Se alguma microrregião foi selecionada
 # --- VISUALIZAÇÃO DO MAPA ---
 st.subheader("🌍 Mapa das Microrregiões Selecionadas")
 
+# --- ADICIONE ESTA LINHA TEMPORARIAMENTE PARA DEBUG ---
+st.write(f"DataFrame para o mapa está vazio? {df_sel.empty}")
+st.write(f"Número de linhas no DataFrame do mapa: {len(df_sel)}")
+if df_sel.empty:
+    st.write("Verifique seus filtros. Nenhuma microrregião corresponde aos critérios.")
+# --- FIM DA LINHA DE DEBUG ---
+
 if not df_sel.empty:
     # Ajuste o 'locations' para a coluna exata no seu DataFrame que contém o código da microrregião (ex: 29001)
     # E o 'featureidkey' para o caminho exato no GeoJSON (geralmente properties.CD_MICRORR para IBGE)
