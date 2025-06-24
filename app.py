@@ -126,7 +126,7 @@ if not df_sel.empty:
         hover_name="Microrregião",
         # --- AJUSTES DE ZOOM E CENTRO DO MAPA PARA O BRASIL ---
         center={"lat": -15, "lon": -53}, # Centro do Brasil
-        zoom=3.5, # Zoom para abranger o Brasil
+        zoom=2, # Zoom para abranger o Brasil
         color_continuous_scale="YlOrBr", # Escala de cores
         height=500 # Altura do mapa em pixels
     )
@@ -137,7 +137,7 @@ if not df_sel.empty:
 #     st.info("Selecione um Estado e/ou Microrregiões para visualizar no mapa.") # Removido conforme solicitado
 
 # --- RANKING DAS MICRORREGIÕES ---
-st.subheader("🏆 Ranking das Microrregiões Selecionadas")
+# st.subheader("🏆 Ranking das Microrregiões Selecionadas")
 
 if not df_sel.empty:
     # Mostra Microrregião, UF e TODOS os indicadores IQM
