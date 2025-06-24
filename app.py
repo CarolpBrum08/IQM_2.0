@@ -124,36 +124,14 @@ if micros_sel: # Se alguma microrregião foi selecionada
 st.subheader("🌍 Mapa das Microrregiões Selecionadas")
 
 if not df_sel.empty:
-    
-    # --- INÍCIO: LINHAS DE DEBUG DO MAPA ---
-    st.write("--- Debug do Mapa ---")
-    st.write(f"Primeiros 5 CÓDIGOS DA MICRORREGIÃO do df_sel (para locations):")
-    st.write(df_sel["Código da Microrregião"].head().tolist()) # Mostra como lista para ver o tipo
-    st.write(f"Tipo da coluna 'Código da Microrregião' no df_sel: {df_sel['Código da Microrregião'].dtype}")
-
-    st.write(f"Primeiros 5 IDs 'CD_MICRORR' do GeoJSON (para featureidkey):")
-    # Tenta pegar 5 IDs do GeoJSON para comparar
-    geojson_ids_sample = []
-    for feature in geojson_data['features']:
-        if 'properties' in feature and 'CD_MICRORR' in feature['properties']:
-            geojson_ids_sample.append(feature['properties']['CD_MICRORR'])
-        if len(geojson_ids_sample) >= 5:
-            break
-    st.write(geojson_ids_sample)
-    if geojson_ids_sample:
-        st.write(f"Tipo do primeiro ID 'CD_MICRORR' no GeoJSON: {type(geojson_ids_sample[0])}")
-    else:
-        st.write("Não foi possível coletar IDs do GeoJSON.")
-    st.write("---------------------")
-    # --- FIM: LINHAS DE DEBUG DO MAPA ---
-    
+   
     # Ajuste o 'locations' para a coluna exata no seu DataFrame que contém o código da microrregião (ex: 29001)
-    # E o 'featureidkey' para o caminho exato no GeoJSON (geralmente properties.CD_MICRORR para IBGE)
+    # E o 'featureidkey' para o caminho exato no GeoJSON (geralmente properties.CD_MICRO para IBGE)
     fig = px.choropleth_mapbox(
         df_sel,
         geojson=geojson_data,
         locations="Código da Microrregião", # <--- *** Coluna no seu DF com o ID da microrregião ***
-        featureidkey="properties.CD_MICRORR", # <--- *** Caminho para o ID no GeoJSON (CONFIRMADO) ***
+        featureidkey="properties.CD_MICRO", # <--- *** Caminho para o ID no GeoJSON (CONFIRMADO) ***
         color=indicador_sel,
         hover_name="Microrregião",
         # --- AJUSTES DE ZOOM E CENTRO DO MAPA (UX) ---
