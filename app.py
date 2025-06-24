@@ -127,7 +127,7 @@ if not df_sel.empty:
    
     # Ajuste o 'locations' para a coluna exata no seu DataFrame que contém o código da microrregião (ex: 29001)
     # E o 'featureidkey' para o caminho exato no GeoJSON (geralmente properties.CD_MICRO para IBGE)
-    fig = px.choropleth_mapbox(
+    fig = px.choropleth_map(
         df_sel,
         geojson=geojson_data,
         locations="Código da Microrregião", # <--- *** Coluna no seu DF com o ID da microrregião ***
@@ -138,7 +138,7 @@ if not df_sel.empty:
         # Estes são valores FIXOS. Para zoom dinâmico, você precisaria calcular o centroide
         # e o zoom com base nas microrregiões selecionadas no df_sel.
         center={"lat": -15, "lon": -53}, # Exemplo: Centro do Brasil. Ajuste para um ponto inicial melhor.
-        zoom=4, # Zoom inicial. 4.5 pode ser demais se for Brasil inteiro. Ajuste conforme necessário.
+        zoom=4.5, # Zoom inicial. 4.5 pode ser demais se for Brasil inteiro. Ajuste conforme necessário.
         # --- FIM AJUSTES DE ZOOM ---
         color_continuous_scale="YlOrBr", # Escala de cores (pode experimentar outras: Viridis, Plasma, etc.)
         height=500 # Altura do mapa em pixels
